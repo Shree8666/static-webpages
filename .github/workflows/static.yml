@@ -1,70 +1,64 @@
-name: Deploy Static Sites to EC2 with Docker Compose
+name: Deploy to EC2
 
 on:
   push:
-    branches: ["main"]
-  workflow_dispatch:
+    branches: [ "main" ]
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-      - name: Set up SSH
+      # Start ssh-agent and add EC2 private key
+      - name: Setup SSH
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
 
-      - name: Copy files to EC2
-        run: |
-          rsync -avz --delete \
-          -e "ssh -o StrictHostKeyChecking=no" \
-          ./ ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/home/${{ secrets.EC2_USER }}/static-sites/
-
-      - name: Deploy with Docker Compose
+      # Deploy to EC2
+      - name: Deploy to EC2
         run: |
           ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
             set -e
 
-            # Install Docker if missing
-            if ! command -v docker &> /dev/null
-            then
-              echo "Installing Docker..."
-              sudo dnf update -y
-              sudo dnf install -y docker
-              sudo systemctl enable docker
-              sudo systemctl start docker
-              sudo usermod -aG docker $USER
-            else
-              echo "Docker already installed."
-              sudo systemctl start docker
-              sudo systemctl enable docker
-            fi
+            echo "==> Updating system..."
+            sudo dnf update -y
 
-            # Install Docker Compose if missing
-            if ! command -v docker-compose &> /dev/null
-            then
-              echo "Installing Docker Compose..."
-              sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-              sudo chmod +x /usr/local/bin/docker-compose
-            else
-              echo "Docker Compose already installed."
-            fi
+            echo "==> Installing Docker..."
+            sudo dnf install -y docker
 
-            # Extend docker-compose timeout
-            export COMPOSE_HTTP_TIMEOUT=200
+            echo "==> Enabling Docker service..."
+            sudo systemctl enable docker
+            sudo systemctl start docker
 
-            cd /home/${USER}/static-sites
+            echo "==> Installing Docker Compose plugin..."
+            sudo dnf install -y docker-compose-plugin
 
-            echo "Stopping old containers..."
-            docker-compose down || true
+            echo "==> Creating project directory..."
+            mkdir -p ~/project
 
-            echo "Pulling images..."
-            docker-compose pull
+            echo "==> Pulling latest code..."
+            exit
+          EOF
 
-            echo "Starting containers..."
-            docker-compose up -d --build
+      # Sync project files from GitHub runner to EC2
+      - name: Rsync project files
+        run: |
+          rsync -avz --delete \
+            -e "ssh -o StrictHostKeyChecking=no" \
+            ./ ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/project
+
+      # Start containers using new docker compose
+      - name: Start containers on EC2
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+            cd ~/project
+            echo "==> Stopping old containers..."
+            docker compose down || true
+
+            echo "==> Starting new containers..."
+            docker compose up -d --build
           EOF
