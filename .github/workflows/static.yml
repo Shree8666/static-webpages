@@ -34,14 +34,15 @@ jobs:
             sudo systemctl enable docker
             sudo systemctl start docker
 
-            echo "==> Installing Docker Compose plugin..."
-            sudo dnf install -y docker-compose-plugin
+            echo "==> Installing Docker Compose v2..."
+            DOCKER_CONFIG=${DOCKER_CONFIG:-$HOME/.docker}
+            mkdir -p $DOCKER_CONFIG/cli-plugins
+            curl -SL https://github.com/docker/compose/releases/download/v2.29.7/docker-compose-linux-x86_64 \
+              -o $DOCKER_CONFIG/cli-plugins/docker-compose
+            chmod +x $DOCKER_CONFIG/cli-plugins/docker-compose
 
-            echo "==> Creating project directory..."
-            mkdir -p ~/project
-
-            echo "==> Pulling latest code..."
-            exit
+            echo "==> Docker Compose version:"
+            docker compose version
           EOF
 
       # Sync project files from GitHub runner to EC2
